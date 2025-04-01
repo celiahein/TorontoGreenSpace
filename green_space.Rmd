@@ -1,0 +1,139 @@
+---
+title: "Toronto Green Space"
+output: html_notebook
+---
+
+
+
+```{r}
+library(rsi)
+library(terra)
+library(tidyverse)
+library(sf)
+library(tmap)
+library(here)
+```
+
+### Get locations and create neighborhood polygons
+```{r}
+Locations.df <- data.frame(Label=c("Church & Wellesley", "Southern Rosedale"), Latitude=c(43.665711, 43.676596), Longitude=c(-79.380943, -79.378481))
+```
+
+Convert to sf spatial object, define and change crs projection
+```{r}
+Locations.latlon <- sf::st_as_sf(Locations.df, coords=c("Longitude", "Latitude"),
+                                crs=4326)
+Locations.sf <- sf::st_transform(Locations.latlon, crs=32617)
+```
+
+Create a 500 m buffer around each location, then separate the buffers for the upcoming analysis
+
+```{r}
+Buffers <- sf::st_buffer(Locations.sf, dist=500)
+CW <- Buffers[1,]
+SR <- Buffers[2,]
+```
+
+Plot to check it
+```{r}
+tmap_mode("view")
+
+tm_shape(Buffers) + tm_borders(col="red")
+```
+
+### Get Landsat8 images
+
+Go online to find the dates you want for your imagery. \
+\
+Apply function get_landsat_imagery of R package rsi to each buffer (i.e., each local landscape) \
+\
+The resolution of Landsat8 is waaay too low (~30 m) for an urban setting, but it's free to download without an account or token, which is why we chose it for this tutorial.
+
+```{r}
+CW_imagery <- rsi::get_landsat_imagery(CW,
+    start_date = "2024-08-14",
+    end_date = "2024-08-15",
+    output_filename = tempfile(fileext = ".tif"))
+
+SR_imagery <- rsi::get_landsat_imagery(SR,
+    start_date = "2024-08-14",
+    end_date = "2024-08-15",
+    output_filename = tempfile(fileext = ".tif"))
+```
+
+Convert to raster
+```{r}
+CW_imagery <- terra::rast(CW_imagery)
+SR_imagery <- terra::rast(SR_imagery)
+```
+
+Mask to area of interest
+```{r}
+CW_imagery <- terra::mask(CW_imagery, CW)
+SR_imagery <- terra::mask(SR_imagery, SR)
+```
+
+Plot to check
+```{r}
+par(mfrow=c(1,2))
+terra::plotRGB(CW_imagery, r = 4, g = 3, b = 2, stretch = "lin")
+terra::plotRGB(SR_imagery, r = 4, g = 3, b = 2, stretch = "lin")
+```
+
+Write the files out in a rasterstack so you don't have to re-download it later
+```{r}
+writeRaster(CW_imagery, paste0(here::here(),"/data/CW_landsat8_14Aug2024.tif"),
+   overwrite=TRUE)
+writeRaster(SR_imagery, paste0(here::here(),"/data/SR_landsat8_14Aug2024.tif"),
+   overwrite=TRUE)
+```
+
+Plot in infrared to see the greenspaces better
+```{r}
+par(mfrow=c(1,2))
+terra::plotRGB(CW_imagery, r = "N", g = "R", b = "G", stretch = "lin")
+terra::plotRGB(SR_imagery, r = "N", g = "R", b = "G", stretch = "lin")
+
+```
+### Calculate NDVI
+```{r}
+CW_ndvi <- (CW_imagery[["N"]] - CW_imagery[["R"]])/
+                    (CW_imagery[["N"]] + CW_imagery[["R"]])
+
+SR_ndvi <- (SR_imagery[["N"]] - SR_imagery[["R"]])/
+                    (SR_imagery[["N"]] + SR_imagery[["R"]])
+```
+
+
+```{r}
+par(mfrow=c(1,2))
+terra::plot(CW_ndvi, range = c(-1, 1))
+terra::plot(SR_ndvi, range = c(-1, 1))
+```
+Calculate the mean NDVI for each neighborhood
+```{r}
+data.frame(
+           CW_NDVI=mean(terra::values(CW_ndvi), na.rm=TRUE),
+           SR_NDVI=mean(terra::values(SR_ndvi), na.rm=TRUE))
+```
+```{r}
+threshold = 0.6
+CW_veg <- as.numeric(CW_ndvi > threshold)
+SR_veg <- as.numeric(SR_ndvi > threshold)
+```
+
+
+```{r}
+par(mfrow=c(1,2))
+terra::plot(CW_veg, range = c(-1, 1), col=c("grey", "darkgreen"))
+terra::plot(SR_veg, range = c(-1, 1), col=c("grey", "darkgreen"))
+```
+
+```{r}
+data.frame(
+           PctVeg_CW=mean(terra::values(CW_veg), na.rm=TRUE),
+           PctVeg_SR=mean(terra::values(SR_veg), na.rm=TRUE))
+```
+
+
+

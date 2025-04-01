@@ -1,0 +1,120 @@
+---
+title: "Comparing Tree Cover between two Toronto Neighborhoods"
+output: html_notebook
+---
+
+ 
+
+```{r}
+#library(opendatatoronto)
+library(dplyr)
+library(sf)
+library(tmap)
+```
+
+Use the opendatatoronto package to get the data or download it manually off the website https://open.toronto.ca/dataset/topographic-mapping-physical-location-of-trees/
+```{r}
+# get package
+# package <- show_package("84f16008-8040-40ba-844d-c1d3863b80f6")
+# package
+
+trees <- sf::read_sf(paste0(here::here(), "/data/Tree Point/TOPO_TREE_WGS84.shp"))
+```
+
+This file is quite big so we are just going to look at a couple small areas
+
+### Get locations and create neighborhood polygons
+```{r}
+Locations.df <- data.frame(Label=c("Church & Wellesley", "Southern Rosedale"), Latitude=c(43.665711, 43.676596), Longitude=c(-79.380943, -79.378481))
+```
+
+Convert to sf spatial object, define the crs. The crs matches the trees dataset as is, so we don't need to transform it.
+```{r}
+Locations.sf <- sf::st_as_sf(Locations.df, coords=c("Longitude", "Latitude"),crs=4326)
+```
+
+Create a 500 m buffer around each location, then separate the buffers for the upcoming analysis
+
+```{r}
+Buffers <- sf::st_buffer(Locations.sf, dist=500)
+CW <- Buffers[1,]
+SR <- Buffers[2,]
+```
+
+Plot to check it
+```{r}
+tmap_mode("view")
+
+tm_shape(Buffers) + tm_borders(col="red")
+```
+Crop the tree dataset to just the neighborhoods
+```{r}
+CW_trees <- sf::st_intersection(trees, CW)
+SR_trees <- sf::st_intersection(trees, SR)
+```
+```{r}
+tmap_mode("view")
+
+tm_shape(Buffers) + tm_borders(col="red") +
+  tm_shape(CW_trees)+ tm_dots(fill= "darkgreen")+
+  tm_shape(SR_trees)+ tm_dots(fill="darkgreen")
+```
+
+https://www.itreetools.org/documents/349/Toronto_Every_Tree_Counts.pdf
+
+The tree species provding the most leaf area in Toronto, and second most common tree species in the city, is the Norway Maple. With maples in general creating nearly one thrid of the city's canopy. They were initially planted because they are tolerant of cities, they grow fast, and provide good shade cover. However, they are non-native and sometimes invasive. They are also vulnerable to the Asian Long Horned Beetle, and although Toronto has initiatives in place to combat beetle infestations, a large contributor to the urban forest is at risk.
+
+The average tree trunk diameter in Toronto is only 16.3 cm, and at this size, a very rough estimate of average crown diameter would be approximately 4 m.
+
+For the sake of this exercise, let's assume that all trees in our data are Norway maple with a 4 m crown diameter. Let's put a 4m buffer around each of our tree points to make a rough "simulation" canopy cover.
+
+```{r}
+CW_canopy <- sf::st_buffer(CW_trees, dist=4)
+SR_canopy <- sf::st_buffer(SR_trees, dist=4)
+```
+
+```{r}
+#st_write(CW_canopy, paste0(here::here(), "/data/CW_canopy.shp"))
+#st_write(SR_canopy, paste0(here::here(), "/data/SR_canopy.shp"))
+```
+
+
+Let's take another look!
+```{r}
+tmap_mode("view")
+
+tm_shape(Buffers) + tm_borders(col="red") +
+  tm_shape(CW_canopy)+ tm_polygons(fill= "darkgreen", col="darkgreen")+
+  tm_shape(SR_canopy)+ tm_polygons(fill="darkgreen", col="darkgreen")
+```
+
+Now let's calculate the percent of these neighborhoods covered by the canopy, or percent leaf area. Some of our canopy might be overlapping so before we calculate leaf area, we need to merge our trees
+```{r}
+CW_leafcover <- sf::st_union(CW_canopy)
+SR_leafcover <- sf::st_union(SR_canopy)
+```
+
+
+```{r}
+CW_leafcover <- st_make_valid(CW_leafcover)
+CW_leaf_area <- sum(sf::st_area(CW_leafcover))
+
+SR_leafcover <- st_make_valid(SR_leafcover)
+SR_leaf_area <- sum(sf::st_area(SR_leafcover))
+```
+
+```{r}
+#st_write(CW_leafcover, paste0(here::here(), "/data/CW_leafcover.shp"), append=FALSE)
+#st_write(SR_leafcover, paste0(here::here(), "/data/SR_leafcover.shp"), append=FALSE)
+```
+
+```{r}
+df <- data.frame(Name =c("Church & Wellesley", "South Rosedale"),
+           percent_leaf_cover = c(CW_leaf_area / st_area(CW), SR_leaf_area/st_area(SR)))
+
+df
+```
+```{r}
+st_area(CW)
+```
+
